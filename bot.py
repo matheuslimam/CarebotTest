@@ -67,6 +67,16 @@ async def set_webhook():
     except Exception as e:
         print(f"Erro ao configurar o webhook: {e}")
 
+# Inicia o processamento da fila de updates do bot
+async def start_bot():
+    """Inicia o loop de processamento de updates"""
+    try:
+        print("Iniciando o processamento do bot...")
+        await telegram_app.start()
+        await telegram_app.updater.start_polling()
+    except Exception as e:
+        print(f"Erro ao iniciar o processamento do bot: {e}")
+
 if __name__ == "__main__":
     import asyncio
     from uvicorn import run
@@ -74,6 +84,9 @@ if __name__ == "__main__":
     # Configura o webhook
     print("Configurando webhook...")
     asyncio.run(set_webhook())
+
+    # Inicia o processamento do bot
+    asyncio.run(start_bot())
 
     # Adapta o Flask para ASGI usando WsgiToAsgi
     asgi_app = WsgiToAsgi(app_flask)
