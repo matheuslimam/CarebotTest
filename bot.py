@@ -10,7 +10,11 @@ from uvicorn import Config, Server
 from telegram import (
     Update,
     InlineKeyboardMarkup,
-    InlineKeyboardButton
+    InlineKeyboardButton,
+    LabeledPrice,
+    ShippingOption,
+    PreCheckoutQuery,
+    SuccessfulPayment
 )
 from telegram.ext import (
     Application,
@@ -19,7 +23,9 @@ from telegram.ext import (
     CallbackQueryHandler,
     filters,
     ContextTypes,
-    ConversationHandler
+    ConversationHandler,
+    PreCheckoutQueryHandler,
+    ShippingQueryHandler
 )
 
 logging.basicConfig(level=logging.DEBUG)
@@ -29,6 +35,9 @@ BOT_TOKEN = os.getenv("BOT_TOKEN", "YOUR_TOKEN_HERE")
 RENDER_EXTERNAL_URL = os.getenv("RENDER_EXTERNAL_URL", "YOUR_URL_HERE")
 WEBHOOK_PATH = f"/webhook/{BOT_TOKEN}"
 WEBHOOK_URL = f"{RENDER_EXTERNAL_URL}{WEBHOOK_PATH}"
+
+# 1) TOKEN do provedor de pagamento oficial do Telegram (obtido no BotFather)
+PAYMENT_PROVIDER_TOKEN = os.getenv("PAYMENT_PROVIDER_TOKEN", "PROVIDER_TOKEN_AQUI")
 
 app_flask = Flask(__name__)
 telegram_app = Application.builder().token(BOT_TOKEN).build()
@@ -126,7 +135,6 @@ async def analyze(update: Update, context: ContextTypes.DEFAULT_TYPE):
         for symptom, result in zip(symptoms, analysis_results)
     )
 
-    # Editar a mensagem de análise
     await update.callback_query.edit_message_text(
         text=(
             f"Baseado nos sintomas informados, aqui está a análise inicial:\n"
@@ -155,101 +163,209 @@ async def plan_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
 
     plan_choice = query.data  # "plan_gratuito", "plan_ouro" ou "plan_diamante"
+    context.user_data["plan"] = plan_choice
 
     if plan_choice == "plan_gratuito":
-        context.user_data["plan"] = "Gratuito"
         await query.edit_message_text(
             "Aqui está uma prévia da sua prescrição básica."
         )
         return ConversationHandler.END
-
-    elif plan_choice == "plan_ouro":
-        context.user_data["plan"] = "Ouro"
+    elif plan_choice in ["plan_ouro", "plan_diamante"]:
+        # Chamamos a função que envia a invoice
         await query.edit_message_text(
-            "Você escolheu o plano Ouro. Por favor, realize o pagamento."
+            f"Você escolheu o plano {plan_choice.replace('plan_', '').capitalize()}.\nEnviando a invoice de pagamento..."
         )
-        # Vamos direto para a etapa de pagamento
-        return PAYMENT
-
-    elif plan_choice == "plan_diamante":
-        context.user_data["plan"] = "Diamante"
-        await query.edit_message_text(
-            "Você escolheu o plano Diamante. Por favor, realize o pagamento."
-        )
-        # Vamos direto para a etapa de pagamento
+        await send_invoice(update, context)
+        # Fica aguardando a conclusão do pagamento
         return PAYMENT
 
     await query.edit_message_text("Plano não reconhecido. Por favor, tente novamente.")
     return PLAN
 
-async def payment(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# ------------------------------------------------------------------------------
+# 2) FUNÇÃO PARA ENVIAR A INVOICE VIA TELEGRAM
+# ------------------------------------------------------------------------------
+async def send_invoice(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Envia a Invoice de acordo com o plano escolhido."""
+    chat_id = update.callback_query.message.chat_id
+    plan = context.user_data.get("plan", "desconhecido")
+
+    if plan == "plan_ouro":
+        title = "Plano Ouro"
+        description = "Pagamento do Plano Ouro"
+        prices = [LabeledPrice("Plano Ouro", 50000)]  # valor em centavos. Ex: R$500,00
+    elif plan == "plan_diamante":
+        title = "Plano Diamante"
+        description = "Pagamento do Plano Diamante"
+        prices = [LabeledPrice("Plano Diamante", 100000)]  # Ex: R$1000,00
+    else:
+        # fallback
+        title = "Plano Desconhecido"
+        description = "Valor genérico"
+        prices = [LabeledPrice("Pagamento Genérico", 10000)]  # R$100
+
+    payload = f"{plan}_payload_123"  # algo para identificar internamente
+    currency = "BRL"
+
+    # Enviando invoice:
+    await telegram_app.bot.send_invoice(
+        chat_id,
+        title=title,
+        description=description,
+        payload=payload,
+        provider_token=PAYMENT_PROVIDER_TOKEN,  # TOKEN do provedor
+        currency=currency,
+        prices=prices,
+        # Se NÃO precisa de endereço de envio, definimos:
+        need_name=True,
+        need_phone_number=False,
+        need_shipping_address=False,
+        is_flexible=False,  # se tiver frete variado, vira True
+    )
+
+# ------------------------------------------------------------------------------
+# 3) TRATANDO A CONFIRMAÇÃO (PreCheckoutQuery) E O PAGAMENTO CONCLUÍDO
+# ------------------------------------------------------------------------------
+async def precheckout_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Chamado antes de finalizar a compra. Validamos e respondemos se está ok."""
+    query: PreCheckoutQuery = update.pre_checkout_query
+    # Se quiser, pode checar algo no payload
+    if not query.invoice_payload:
+        # se algo estiver errado, responda com ok=False e reason
+        await query.answer(ok=False, error_message="Falha ao processar pagamento.")
+    else:
+        await query.answer(ok=True)
+
+async def successful_payment_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
-    Assim que o pagamento for “recebido”, decidimos o próximo passo:
-    - Se for Ouro, podemos encerrar logo após confirmar.
-    - Se for Diamante, pedimos para enviar o exame de sangue.
+    Quando o pagamento é concluído com sucesso, o Telegram envia no 'message.successful_payment'.
     """
+    payment: SuccessfulPayment = update.message.successful_payment
+    logger.info(f"Pagamento bem-sucedido. Detalhes: {payment.to_dict()}")
+
     plan = context.user_data.get("plan", "Desconhecido")
 
-    # Exemplos de tratativa de pagamento
-    user_message = update.message.text
-    logger.info(f"Usuário enviou: {user_message} (para pagamento do plano {plan})")
+    # Resposta ao usuário
+    await update.message.reply_text(
+        f"Pagamento do {plan.replace('plan_', '').capitalize()} confirmado com sucesso!\n"
+        "Obrigado. Agora prossiga com o que for necessário."
+    )
 
-    # Resposta padrão
-    await update.message.reply_text("Pagamento recebido com sucesso!")
-
-    if plan == "Diamante":
-        # Agora solicitamos o exame
+    if plan == "plan_diamante":
+        # Pedir envio de exame
         await update.message.reply_text(
             "Envie o resultado do exame de sangue para prosseguirmos."
         )
         return EXAM
-    else:
-        # Se for Ouro (ou algum outro que você queira encerrar)
-        await update.message.reply_text(
-            f"Você concluiu o pagamento do Plano {plan}. Aqui está a sua prescrição!"
-        )
+    elif plan == "plan_ouro":
+        # Encerrar (ou mostrar prescrição)
+        await update.message.reply_text("Aqui está a sua prescrição do Plano Ouro!")
         return ConversationHandler.END
 
+    # Caso não seja nenhum dos dois, encerra:
+    return ConversationHandler.END
+
+
+# ------------------------------------------------------------------------------
+# 4) TRATANDO CASO SEJA EXIGIDO EXAME (DIAMANTE)
+# ------------------------------------------------------------------------------
 async def exam(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    Lógica para tratar o recebimento do exame no plano Diamante,
-    podendo depois gerar a prescrição e encerrar.
-    """
-    # Exemplo: o usuário envia alguma informação que chamamos de "exame"
     exam_result = update.message.text
     logger.info(f"Exame recebido: {exam_result}")
 
     await update.message.reply_text(
-        "Exame de sangue processado com sucesso. Aqui está a sua prescrição personalizada!"
+        "Exame de sangue processado. Aqui está sua prescrição personalizada!"
     )
     return ConversationHandler.END
+
+
+# ------------------------------------------------------------------------------
+# 5) (Opcional) Se quiser tratar envio físico, use ShippingQueryHandler:
+# ------------------------------------------------------------------------------
+async def shipping_query_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Exemplo caso seu produto exija envio (need_shipping_address=True).
+    Precisaria definir shipping_options.
+    """
+    shipping_query = update.shipping_query
+    shipping_options = [
+        ShippingOption(
+            id="frete_normal",
+            title="Frete Normal",
+            prices=[LabeledPrice("Frete Normal", 1000)]
+        ),
+        ShippingOption(
+            id="frete_express",
+            title="Frete Expresso",
+            prices=[LabeledPrice("Frete Expresso", 2000)]
+        )
+    ]
+    await shipping_query.answer(ok=True, shipping_options=shipping_options)
+
 
 async def result(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Aqui está sua prescrição personalizada.")
     return ConversationHandler.END
 
+
 async def log_error(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.error(f"Erro no update {update}: {context.error}")
     traceback.print_exc()
 
+
+# ------------------------------------------------------------------------------
+# 6) CONFIGURANDO OS HANDLERS E ESTADOS DA CONVERSATION
+# ------------------------------------------------------------------------------
 conversation_handler = ConversationHandler(
     entry_points=[CommandHandler("start", welcome)],
     states={
         SYMPTOMS_YES_NO: [CallbackQueryHandler(symptoms_yes_no)],
         PLAN: [CallbackQueryHandler(plan_callback, pattern="^plan_")],
-        PAYMENT: [MessageHandler(filters.TEXT & (~filters.COMMAND), payment)],
+
+        # Quando enviamos a invoice, ficamos no estado PAYMENT. O pagamento oficial
+        # não é processado via 'message' de texto, mas via PreCheckout e successful_payment.
+        # Então aqui, se o usuário mandar algo antes do pagamento oficial, ainda estamos no PAYMENT.
+        PAYMENT: [
+            MessageHandler(filters.TEXT & (~filters.COMMAND), lambda u, c: c.bot.send_message(
+                u.message.chat_id, "Aguarde o fluxo de pagamento oficial!")
+            )
+        ],
+
         EXAM: [MessageHandler(filters.TEXT & (~filters.COMMAND), exam)],
         RESULT: [MessageHandler(filters.TEXT & (~filters.COMMAND), result)],
     },
     fallbacks=[CommandHandler("start", welcome)]
 )
 
+# ------------------------------------------------------------------------------
+# 7) FUNÇÃO PRINCIPAL E WEBHOOK
+# ------------------------------------------------------------------------------
 async def set_webhook():
     await telegram_app.bot.set_webhook(WEBHOOK_URL)
     logger.info(f"Webhook definido: {WEBHOOK_URL}")
 
+
 async def main():
+    # Adicionamos o conversation handler
     telegram_app.add_handler(conversation_handler)
+
+    # 7.1) Adicionamos handler para PreCheckout
+    telegram_app.add_handler(PreCheckoutQueryHandler(precheckout_callback))
+
+    # 7.2) Adicionamos handler para pagamento bem-sucedido
+    #     Basta verificar se a mensagem possui successful_payment
+    from telegram.ext.filters import UPDATE, StatusUpdate
+    telegram_app.add_handler(
+        MessageHandler(
+            filters.StatusUpdate.SUCCESSFUL_PAYMENT,
+            successful_payment_callback
+        )
+    )
+
+    # 7.3) Se precisar do shipping, adicionamos:
+    telegram_app.add_handler(ShippingQueryHandler(shipping_query_handler))
+
+    # 7.4) Handler global de erros
     telegram_app.add_error_handler(log_error)
 
     await set_webhook()
@@ -272,6 +388,7 @@ async def main():
 
     logger.info("Servidor Uvicorn parado. Encerrando bot.")
     await telegram_app.stop()
+
 
 if __name__ == "__main__":
     asyncio.run(main())
