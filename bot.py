@@ -160,7 +160,7 @@ conversation_handler = ConversationHandler(
     entry_points=[CommandHandler("start", welcome)],
     states={
         SYMPTOMS_YES_NO: [CallbackQueryHandler(symptoms_yes_no)],
-        SYMPTOMS: [CallbackQueryHandler(symptoms)],
+        
         ANALYZE: [MessageHandler(filters.TEXT, analyze)],
         PLAN: [MessageHandler(filters.TEXT, plan)],
         PAYMENT: [MessageHandler(filters.TEXT, payment)],
