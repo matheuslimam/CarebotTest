@@ -7,13 +7,14 @@ from flask import Flask, request
 from asgiref.wsgi import WsgiToAsgi
 from uvicorn import Config, Server
 
-from telegram import Update
+from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import (
     Application,
     CommandHandler,
     MessageHandler,
     filters,
-    ContextTypes
+    ContextTypes,
+    ConversationHandler
 )
 
 logging.basicConfig(level=logging.DEBUG)
@@ -26,7 +27,6 @@ WEBHOOK_URL = f"{RENDER_EXTERNAL_URL}{WEBHOOK_PATH}"
 
 app_flask = Flask(__name__)
 telegram_app = Application.builder().token(BOT_TOKEN).build()
-
 
 @app_flask.route(WEBHOOK_PATH, methods=["POST"])
 def webhook():
@@ -45,13 +45,80 @@ def webhook():
         traceback.print_exc()
     return "OK", 200
 
+# --------------------------
+# Estados e Handlers para o fluxo
+# --------------------------
+WELCOME, SYMPTOMS, ANALYZE, PLAN, PAYMENT, EXAM, RESULT = range(7)
+
+symptoms_keyboard = [["Cansaço", "Falta de Apetite"], ["Outros"]]
+plans_keyboard = [["Gratuito", "Ouro", "Diamante"]]
+
+async def welcome(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "Olá! Seja bem-vindo ao CareBot.\nPor favor, informe os sintomas que você está sentindo.",
+        reply_markup=ReplyKeyboardMarkup(symptoms_keyboard, one_time_keyboard=True)
+    )
+    return SYMPTOMS
+
+async def symptoms(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_symptoms = update.message.text
+    context.user_data["symptoms"] = user_symptoms
+    await update.message.reply_text(
+        "Estamos analisando possíveis carências com base nos sintomas informados..."
+    )
+    return ANALYZE
+
+async def analyze(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "Escolha um dos planos disponíveis para continuar.",
+        reply_markup=ReplyKeyboardMarkup(plans_keyboard, one_time_keyboard=True)
+    )
+    return PLAN
+
+async def plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    plan_choice = update.message.text
+    context.user_data["plan"] = plan_choice
+    if plan_choice == "Gratuito":
+        await update.message.reply_text("Aqui está uma prévia da sua prescrição básica.")
+        return ConversationHandler.END
+    elif plan_choice == "Ouro":
+        await update.message.reply_text("Processando prescrição avançada...")
+        return PAYMENT
+    elif plan_choice == "Diamante":
+        await update.message.reply_text(
+            "Com o plano Diamante, você precisa realizar um exame de sangue. Vamos prosseguir."
+        )
+        return EXAM
+
+async def payment(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Insira os dados do pagamento.")
+    return ConversationHandler.END
+
+async def exam(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Exame de sangue processado. Prescrição biodisponível gerada.")
+    return RESULT
+
+async def result(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Aqui está sua prescrição personalizada.")
+    return ConversationHandler.END
+
+# Adicionando os handlers ao ConversationHandler
+conversation_handler = ConversationHandler(
+    entry_points=[CommandHandler("start", welcome)],
+    states={
+        SYMPTOMS: [MessageHandler(filters.TEXT, symptoms)],
+        ANALYZE: [MessageHandler(filters.TEXT, analyze)],
+        PLAN: [MessageHandler(filters.TEXT, plan)],
+        PAYMENT: [MessageHandler(filters.TEXT, payment)],
+        EXAM: [MessageHandler(filters.TEXT, exam)],
+        RESULT: [MessageHandler(filters.TEXT, result)],
+    },
+    fallbacks=[CommandHandler("start", welcome)]
+)
 
 # --------------------------
-# Handlers
+# Outros Handlers e Configuração do Bot
 # --------------------------
-async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Olá! Sou seu bot + Uvicorn em loop único.")
-
 async def echo_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     await update.message.reply_text(f"Você disse: {text}")
@@ -60,11 +127,9 @@ async def log_error(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.error(f"Erro no update {update}: {context.error}")
     traceback.print_exc()
 
-
 async def set_webhook():
     await telegram_app.bot.set_webhook(WEBHOOK_URL)
     logger.info(f"Webhook definido: {WEBHOOK_URL}")
-
 
 async def main():
     """
@@ -73,7 +138,7 @@ async def main():
       2) o servidor Uvicorn, tudo no mesmo event loop
     """
     # 1. Registra handlers
-    telegram_app.add_handler(CommandHandler("start", start_command))
+    telegram_app.add_handler(conversation_handler)
     telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo_message))
     telegram_app.add_error_handler(log_error)
 
@@ -84,8 +149,6 @@ async def main():
     await telegram_app.initialize()
 
     # 4. Inicia o PTB *em segundo plano*
-    #    Obs.: se chamarmos await telegram_app.start(), o código bloquearia.
-    #    Então vamos criar uma *task* para que o PTB fique rodando "paralelamente".
     asyncio.create_task(telegram_app.start())
 
     # 5. Inicia o Uvicorn via Config+Server, sem usar uvicorn.run()
@@ -95,8 +158,8 @@ async def main():
         app=asgi_app,
         host="0.0.0.0",
         port=int(os.getenv("PORT", "5000")),
-        loop="asyncio",   # Garante que usaremos o loop atual
-        lifespan="off",   # Desativa suporte ao 'lifespan' events do ASGI
+        loop="asyncio",
+        lifespan="off",
     )
     server = Server(config)
 
@@ -108,7 +171,5 @@ async def main():
     logger.info("Servidor Uvicorn parado. Encerrando bot.")
     await telegram_app.stop()
 
-
 if __name__ == "__main__":
-    # Executa tudo em um só event loop
     asyncio.run(main())
