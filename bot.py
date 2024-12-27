@@ -50,28 +50,61 @@ def webhook():
 # --------------------------
 WELCOME, SYMPTOMS, ANALYZE, PLAN, PAYMENT, EXAM, RESULT = range(7)
 
-symptoms_keyboard = [["Cansaço", "Falta de Apetite"], ["Outros"]]
+# Lista completa de sintomas
+symptoms_keyboard = [
+    ["Cansaço", "Falta de Apetite", "Dor de Cabeça"],
+    ["Náusea", "Tontura", "Palpitações"],
+    ["Falta de Energia", "Insônia", "Outros"]
+]
+
 plans_keyboard = [["Gratuito", "Ouro", "Diamante"]]
 
 async def welcome(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "Olá! Seja bem-vindo ao CareBot.\nPor favor, informe os sintomas que você está sentindo.",
-        reply_markup=ReplyKeyboardMarkup(symptoms_keyboard, one_time_keyboard=True)
+        "Olá! Seja bem-vindo ao CareBot.\nPor favor, informe os sintomas que você está sentindo."
+        "Você pode selecionar vários sintomas.",
+        reply_markup=ReplyKeyboardMarkup(symptoms_keyboard, one_time_keyboard=True, resize_keyboard=True)
     )
+    context.user_data["symptoms"] = []  # Inicializa a lista de sintomas
     return SYMPTOMS
 
 async def symptoms(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_symptoms = update.message.text
-    context.user_data["symptoms"] = user_symptoms
+    selected_symptom = update.message.text
+    if selected_symptom == "Outros":
+        await update.message.reply_text("Por favor, descreva os sintomas adicionais.")
+        return SYMPTOMS
+    
+    context.user_data["symptoms"].append(selected_symptom)
     await update.message.reply_text(
-        "Estamos analisando possíveis carências com base nos sintomas informados..."
+        f"Você selecionou: {', '.join(context.user_data['symptoms'])}.\n"
+        "Se terminou de selecionar os sintomas, digite 'Concluir'."
     )
-    return ANALYZE
+    return SYMPTOMS
 
 async def analyze(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    symptoms = context.user_data.get("symptoms", [])
+    if not symptoms:
+        await update.message.reply_text("Nenhum sintoma selecionado. Por favor, reinicie o processo.")
+        return ConversationHandler.END
+
+    # Simulação de análise de carências
+    deficiencies = {
+        "Cansaço": "Possível deficiência de ferro ou vitamina B12",
+        "Falta de Apetite": "Possível deficiência de zinco",
+        "Dor de Cabeça": "Pode estar relacionada à desidratação ou falta de magnésio",
+        "Tontura": "Possível deficiência de ferro",
+        "Palpitações": "Pode indicar falta de potássio ou magnésio",
+    }
+
+    analysis_results = [deficiencies.get(symptom, "Sem análise disponível") for symptom in symptoms]
+    results_text = "\n".join(f"- {symptom}: {result}" for symptom, result in zip(symptoms, analysis_results))
+
+    await update.message.reply_text(
+        f"Baseado nos sintomas informados, aqui está a análise inicial:\n{results_text}"
+    )
     await update.message.reply_text(
         "Escolha um dos planos disponíveis para continuar.",
-        reply_markup=ReplyKeyboardMarkup(plans_keyboard, one_time_keyboard=True)
+        reply_markup=ReplyKeyboardMarkup(plans_keyboard, one_time_keyboard=True, resize_keyboard=True)
     )
     return PLAN
 
@@ -106,7 +139,10 @@ async def result(update: Update, context: ContextTypes.DEFAULT_TYPE):
 conversation_handler = ConversationHandler(
     entry_points=[CommandHandler("start", welcome)],
     states={
-        SYMPTOMS: [MessageHandler(filters.TEXT, symptoms)],
+        SYMPTOMS: [
+            MessageHandler(filters.TEXT & ~filters.COMMAND, symptoms),
+            MessageHandler(filters.Regex("^Concluir$"), analyze)
+        ],
         ANALYZE: [MessageHandler(filters.TEXT, analyze)],
         PLAN: [MessageHandler(filters.TEXT, plan)],
         PAYMENT: [MessageHandler(filters.TEXT, payment)],
