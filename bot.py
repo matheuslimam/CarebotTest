@@ -354,10 +354,10 @@ async def main():
 
     # 7.2) Adicionamos handler para pagamento bem-sucedido
     #     Basta verificar se a mensagem possui successful_payment
-    from telegram.ext.filters import UPDATE, StatusUpdate
+    from telegram.ext.filters import StatusUpdate
     telegram_app.add_handler(
         MessageHandler(
-            filters.StatusUpdate.SUCCESSFUL_PAYMENT,
+            StatusUpdate.SUCCESSFUL_PAYMENT,
             successful_payment_callback
         )
     )
