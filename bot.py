@@ -2,6 +2,7 @@ import os
 from flask import Flask, request
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters
+from asgiref.wsgi import WsgiToAsgi  # Importa o adaptador WSGI para ASGI
 
 # Inicializa o Flask
 app_flask = Flask(__name__)
@@ -68,6 +69,9 @@ if __name__ == "__main__":
     print("Configurando webhook...")
     asyncio.run(set_webhook())
 
+    # Adapta o Flask para ASGI usando WsgiToAsgi
+    asgi_app = WsgiToAsgi(app_flask)
+
     # Inicia o servidor com Uvicorn
     print("Iniciando o servidor com Uvicorn...")
-    run(app_flask, host="0.0.0.0", port=int(os.getenv("PORT", 5000)))
+    run(asgi_app, host="0.0.0.0", port=int(os.getenv("PORT", 5000)))
