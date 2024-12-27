@@ -78,49 +78,33 @@ plans_keyboard = [["Gratuito", "Ouro", "Diamante"]]
 # Handlers de cada etapa
 # ---------------------------------------------------------------------
 async def welcome(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    Início da conversa: zera a lista de sintomas e manda a primeira pergunta (Sim/Não).
-    """
     context.user_data["symptoms"] = []
     context.user_data["current_symptom_index"] = 0
     await send_yes_no_question(update, context)
     return SYMPTOMS_YES_NO
 
 async def send_yes_no_question(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    Pergunta se o usuário está sentindo determinado sintoma,
-    usando InlineKeyboard (Sim/Não).
-    """
     index = context.user_data.get("current_symptom_index", 0)
     if index >= len(symptoms_list):
-        # Se já perguntamos sobre todos os sintomas, chama 'analyze'
         return await analyze(update, context)
 
     symptom = symptoms_list[index]
     keyboard = [
-        [
-            InlineKeyboardButton("Sim", callback_data="yes"),
-            InlineKeyboardButton("Não", callback_data="no")
-        ]
+        [InlineKeyboardButton("Sim", callback_data="yes"), InlineKeyboardButton("Não", callback_data="no")]
     ]
 
-    # Se este handler foi chamado a partir de um callback_query:
     if update.callback_query:
         await update.callback_query.edit_message_text(
             text=f"Você está sentindo: {symptom}?",
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
     else:
-        # Se veio de um comando /start ou mensagem de texto
         await update.message.reply_text(
             text=f"Você está sentindo: {symptom}?",
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
 
 async def symptoms_yes_no(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    CallbackQueryHandler para tratar a resposta Sim/Não do sintoma atual.
-    """
     query = update.callback_query
     await query.answer()
 
@@ -130,18 +114,13 @@ async def symptoms_yes_no(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if response == "yes":
         context.user_data["symptoms"].append(symptoms_list[index])
 
-    # Avança para o próximo sintoma
     context.user_data["current_symptom_index"] = index + 1
     await send_yes_no_question(update, context)
     return SYMPTOMS_YES_NO
 
 async def analyze(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    Função que simula análise de carências nutricionais com base nos sintomas.
-    """
     symptoms = context.user_data.get("symptoms", [])
     if not symptoms:
-        # Se não houve sintomas selecionados, encerra.
         await update.callback_query.edit_message_text(
             "Nenhum sintoma selecionado. Por favor, reinicie o processo."
         )
@@ -160,43 +139,28 @@ async def analyze(update: Update, context: ContextTypes.DEFAULT_TYPE):
         deficiencies.get(symptom, "Sem análise disponível") for symptom in symptoms
     ]
     results_text = "\n".join(
-        f"- {symptom}: {result}"
-        for symptom, result in zip(symptoms, analysis_results)
+        f"- {symptom}: {result}" for symptom, result in zip(symptoms, analysis_results)
     )
 
-    # Edita a mensagem atual com o resumo da análise
     await update.callback_query.edit_message_text(
-        text=(
-            f"Baseado nos sintomas informados, aqui está a análise inicial:\n"
-            f"{results_text}"
-        )
+        text=f"Baseado nos sintomas informados, aqui está a análise inicial:\n{results_text}"
     )
 
-    # Envia uma nova mensagem solicitando a escolha de um plano
+    # Agora pergunta qual plano o usuário deseja
     chat_id = update.callback_query.message.chat_id
     await telegram_app.bot.send_message(
         chat_id=chat_id,
         text="Escolha um dos planos disponíveis para continuar.",
-        reply_markup=ReplyKeyboardMarkup(
-            plans_keyboard,
-            one_time_keyboard=True,
-            resize_keyboard=True
-        ),
+        reply_markup=ReplyKeyboardMarkup(plans_keyboard, one_time_keyboard=True, resize_keyboard=True),
     )
-
     return PLAN
 
 async def plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    Trata a mensagem de texto do usuário, que deve ser "Gratuito", "Ouro" ou "Diamante".
-    """
     plan_choice = update.message.text.strip()
     context.user_data["plan"] = plan_choice
 
     if plan_choice == "Gratuito":
-        await update.message.reply_text(
-            "Aqui está uma prévia da sua prescrição básica."
-        )
+        await update.message.reply_text("Aqui está uma prévia da sua prescrição básica.")
         return ConversationHandler.END
 
     elif plan_choice == "Ouro":
@@ -210,34 +174,29 @@ async def plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return EXAM
 
     else:
-        # Se o usuário digitou algo fora das 3 opções
-        await update.message.reply_text(
-            "Por favor, escolha um plano válido: Gratuito, Ouro ou Diamante."
-        )
+        # Se digitou algo fora das 3 opções, não encerra. Pede novamente.
+        await update.message.reply_text("Por favor, escolha um plano válido: Gratuito, Ouro ou Diamante.")
         return PLAN
 
 async def payment(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    Pede dados do pagamento para o plano 'Ouro'.
-    """
     await update.message.reply_text("Insira os dados do pagamento.")
     return ConversationHandler.END
 
 async def exam(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    Simula o exame de sangue para o plano 'Diamante'.
-    """
-    await update.message.reply_text(
-        "Exame de sangue processado. Prescrição biodisponível gerada."
-    )
+    await update.message.reply_text("Exame de sangue processado. Prescrição biodisponível gerada.")
     return RESULT
 
 async def result(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    Exibe o resultado final após o exame do plano 'Diamante'.
-    """
     await update.message.reply_text("Aqui está sua prescrição personalizada.")
     return ConversationHandler.END
+
+# ---------------------------------------------------------------------
+# Handler extra: Invalid plan ou fallback para o estado PLAN (se quiser separar)
+# ---------------------------------------------------------------------
+# Se quiser separar logicamente, você pode usar algo como:
+# async def invalid_plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
+#     await update.message.reply_text("Por favor, escolha um plano válido: Gratuito, Ouro ou Diamante.")
+#     return PLAN
 
 # ---------------------------------------------------------------------
 # Montagem do ConversationHandler
@@ -251,7 +210,8 @@ conversation_handler = ConversationHandler(
         EXAM: [MessageHandler(filters.TEXT & (~filters.COMMAND), exam)],
         RESULT: [MessageHandler(filters.TEXT & (~filters.COMMAND), result)],
     },
-    fallbacks=[CommandHandler("start", welcome)]
+    fallbacks=[CommandHandler("start", welcome)],
+    per_message=True
 )
 
 # ---------------------------------------------------------------------
@@ -269,25 +229,14 @@ async def set_webhook():
     logger.info(f"Webhook definido: {WEBHOOK_URL}")
 
 async def main():
-    """
-    Função principal que inicia:
-      1) o PTB (Application) e seu loop interno
-      2) o servidor Uvicorn, tudo no mesmo event loop
-    """
-    # 1. Registra handlers
     telegram_app.add_handler(conversation_handler)
     telegram_app.add_error_handler(log_error)
 
-    # 2. Configura webhook
     await set_webhook()
 
-    # 3. Inicializa o PTB
     await telegram_app.initialize()
-
-    # 4. Inicia o PTB *em segundo plano*
     asyncio.create_task(telegram_app.start())
 
-    # 5. Inicia o Uvicorn via Config+Server (sem usar uvicorn.run())
     asgi_app = WsgiToAsgi(app_flask)
     config = Config(
         app=asgi_app,
@@ -301,7 +250,6 @@ async def main():
     logger.info("Iniciando Uvicorn + Bot no mesmo event loop ...")
     await server.serve()
 
-    # Se o servidor encerrar, paramos o bot:
     logger.info("Servidor Uvicorn parado. Encerrando bot.")
     await telegram_app.stop()
 
