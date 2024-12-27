@@ -146,8 +146,8 @@ async def analyze(update: Update, context: ContextTypes.DEFAULT_TYPE):
     inline_plans_keyboard = [
         [
             InlineKeyboardButton("Gratuito", callback_data="plan_gratuito"),
-            InlineKeyboardButton("Ouro", callback_data="plan_ouro"),
-            InlineKeyboardButton("Diamante", callback_data="plan_diamante"),
+            InlineKeyboardButton("Ouro R$50", callback_data="plan_ouro"),
+            InlineKeyboardButton("Diamante R$100", callback_data="plan_diamante"),
         ]
     ]
     await telegram_app.bot.send_message(
@@ -191,11 +191,11 @@ async def send_invoice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if plan == "plan_ouro":
         title = "Plano Ouro"
         description = "Pagamento do Plano Ouro"
-        prices = [LabeledPrice("Plano Ouro", 50000)]  # R$500,00
+        prices = [LabeledPrice("Plano Ouro", 5000)]  # R$500,00
     elif plan == "plan_diamante":
         title = "Plano Diamante"
         description = "Pagamento do Plano Diamante"
-        prices = [LabeledPrice("Plano Diamante", 100000)]  # R$1000,00
+        prices = [LabeledPrice("Plano Diamante", 10000)]  # R$1000,00
     else:
         title = "Plano Desconhecido"
         description = "Valor genérico"
