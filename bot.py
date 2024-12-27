@@ -9,39 +9,33 @@ from telegram.ext import (
     filters,
     ContextTypes
 )
-from asgiref.wsgi import WsgiToAsgi  # Adaptador WSGI -> ASGI
+from asgiref.wsgi import WsgiToAsgi
+import asyncio
+from uvicorn import run
 
 print("Inicializando o bot...")
 
 # Configurações do bot
-BOT_TOKEN: Final = os.getenv("BOT_TOKEN")
+BOT_TOKEN: Final = os.getenv("BOT_TOKEN", "YOUR TOKEN HERE")
 RENDER_EXTERNAL_URL: Final = os.getenv("RENDER_EXTERNAL_URL")
-BOT_HANDLE: Final = "@your_bot_handle"
-
 if not BOT_TOKEN or not RENDER_EXTERNAL_URL:
-    raise ValueError("As variáveis de ambiente BOT_TOKEN e RENDER_EXTERNAL_URL devem estar configuradas.")
+    raise ValueError("BOT_TOKEN e RENDER_EXTERNAL_URL devem estar configurados.")
 
 WEBHOOK_URL: Final = f"{RENDER_EXTERNAL_URL}/webhook/{BOT_TOKEN}"
 
-# Inicializa o Flask
 app_flask = Flask(__name__)
-
-# Cria a instância do Application (python-telegram-bot)
 telegram_app = Application.builder().token(BOT_TOKEN).build()
 
 # -------------------------------------------------------------------
-# 1. Definição dos comandos / handlers
+# Handlers
 # -------------------------------------------------------------------
 async def initiate_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    print("Handler /start acionado.")
     await update.message.reply_text("Olá! Eu sou seu bot. Como posso ajudar?")
 
 async def assist_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    print("Handler /help acionado.")
     await update.message.reply_text("Aqui está a ajuda!")
 
 async def personalize_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    print("Handler /custom acionado.")
     await update.message.reply_text("Comando personalizado adicionado com sucesso.")
 
 def generate_response(user_input: str) -> str:
@@ -57,31 +51,27 @@ def generate_response(user_input: str) -> str:
 
 async def process_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
-    print(f"Handler de mensagem acionado. Mensagem: {text}")
     response = generate_response(text)
-    print("Resposta do bot:", response)
     await update.message.reply_text(response)
 
 async def log_error(update: Update, context: ContextTypes.DEFAULT_TYPE):
     print(f"Erro no update {update}: {context.error}")
 
 # -------------------------------------------------------------------
-# 2. Rota do webhook
+# Webhook: rota SÍNCRONA
 # -------------------------------------------------------------------
 @app_flask.route(f"/webhook/{BOT_TOKEN}", methods=["POST"])
 def webhook():
     try:
-        # Log do update bruto recebido do Telegram
         json_update = request.get_json(force=True)
         print(f"Recebido update bruto: {json_update}")
 
-        # Decodifica o update
         update = Update.de_json(json_update, telegram_app.bot)
         print("Update decodificado com sucesso.")
 
-        # Envia o update para o Application processar
-        telegram_app.post_update(update)  
-        print("Update adicionado ao bot via post_update.")
+        # Envia o update para o Application via queue
+        telegram_app.update_queue.put_nowait(update)
+        print("Update adicionado à fila do bot (update_queue).")
 
         return "OK", 200
     except Exception as e:
@@ -89,7 +79,7 @@ def webhook():
         return f"Erro no webhook: {e}", 500
 
 # -------------------------------------------------------------------
-# 3. Configuração do webhook
+# Configurações de webhook e inicialização
 # -------------------------------------------------------------------
 async def set_webhook():
     try:
@@ -98,14 +88,7 @@ async def set_webhook():
     except Exception as e:
         print(f"Erro ao configurar o webhook: {e}")
 
-# -------------------------------------------------------------------
-# 4. Rotina principal
-# -------------------------------------------------------------------
 if __name__ == "__main__":
-    import asyncio
-    from uvicorn import run
-
-    # 4.1 Registra os handlers ANTES de iniciar o bot
     telegram_app.add_handler(CommandHandler("start", initiate_command))
     telegram_app.add_handler(CommandHandler("help", assist_command))
     telegram_app.add_handler(CommandHandler("custom", personalize_command))
@@ -119,9 +102,9 @@ if __name__ == "__main__":
         print("Bot inicializado. Iniciando processamento da fila...")
         await telegram_app.start()
 
-    # 4.2 Executa as rotinas assíncronas de inicialização
+    # Executa a inicialização assíncrona
     asyncio.run(initialize())
 
-    # 4.3 Sobe o servidor ASGI para lidar com o Flask via WsgiToAsgi
+    # Sobe via WsgiToAsgi
     asgi_app = WsgiToAsgi(app_flask)
-    run(asgi_app, host="0.0.0.0", port=int(os.getenv("PORT", 5000)))
+    run(asgi_app, host="0.0.0.0", port=int(os.getenv("PORT", "5000")))
