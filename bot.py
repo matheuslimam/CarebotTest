@@ -166,29 +166,63 @@ async def plan_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif plan_choice == "plan_ouro":
         context.user_data["plan"] = "Ouro"
         await query.edit_message_text(
-            "Você escolheu o plano Ouro. Envie agora os dados do pagamento."
+            "Você escolheu o plano Ouro. Por favor, realize o pagamento."
         )
+        # Vamos direto para a etapa de pagamento
         return PAYMENT
 
     elif plan_choice == "plan_diamante":
         context.user_data["plan"] = "Diamante"
         await query.edit_message_text(
-            "Você escolheu o plano Diamante. Por favor, realize o exame de sangue e envie o resultado."
+            "Você escolheu o plano Diamante. Por favor, realize o pagamento."
         )
-        return EXAM
+        # Vamos direto para a etapa de pagamento
+        return PAYMENT
 
     await query.edit_message_text("Plano não reconhecido. Por favor, tente novamente.")
     return PLAN
 
 async def payment(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Lógica para tratar pagamento
-    await update.message.reply_text("Ok, pagamento recebido!")
-    return ConversationHandler.END
+    """
+    Assim que o pagamento for “recebido”, decidimos o próximo passo:
+    - Se for Ouro, podemos encerrar logo após confirmar.
+    - Se for Diamante, pedimos para enviar o exame de sangue.
+    """
+    plan = context.user_data.get("plan", "Desconhecido")
+
+    # Exemplos de tratativa de pagamento
+    user_message = update.message.text
+    logger.info(f"Usuário enviou: {user_message} (para pagamento do plano {plan})")
+
+    # Resposta padrão
+    await update.message.reply_text("Pagamento recebido com sucesso!")
+
+    if plan == "Diamante":
+        # Agora solicitamos o exame
+        await update.message.reply_text(
+            "Envie o resultado do exame de sangue para prosseguirmos."
+        )
+        return EXAM
+    else:
+        # Se for Ouro (ou algum outro que você queira encerrar)
+        await update.message.reply_text(
+            f"Você concluiu o pagamento do Plano {plan}. Aqui está a sua prescrição!"
+        )
+        return ConversationHandler.END
 
 async def exam(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Lógica para tratar exame
-    await update.message.reply_text("Exame de sangue processado. Prescrição gerada.")
-    return RESULT
+    """
+    Lógica para tratar o recebimento do exame no plano Diamante,
+    podendo depois gerar a prescrição e encerrar.
+    """
+    # Exemplo: o usuário envia alguma informação que chamamos de "exame"
+    exam_result = update.message.text
+    logger.info(f"Exame recebido: {exam_result}")
+
+    await update.message.reply_text(
+        "Exame de sangue processado com sucesso. Aqui está a sua prescrição personalizada!"
+    )
+    return ConversationHandler.END
 
 async def result(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Aqui está sua prescrição personalizada.")
