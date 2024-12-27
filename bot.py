@@ -66,6 +66,16 @@ async def set_webhook():
     except Exception as e:
         print(f"Erro ao configurar o webhook: {e}")
 
+# Inicia o loop de processamento do Telegram
+async def start_bot():
+    """Inicia o loop de processamento do Telegram Bot."""
+    try:
+        print("Iniciando o processamento de updates...")
+        await app.start()
+        await app.updater.start_polling()
+    except Exception as e:
+        print(f"Erro ao iniciar o processamento do bot: {e}")
+
 if __name__ == "__main__":
     import asyncio
 
@@ -78,6 +88,7 @@ if __name__ == "__main__":
     # Inicia o servidor Flask
     try:
         print("Iniciando o servidor Flask...")
+        asyncio.run(start_bot())
         app_flask.run(host="0.0.0.0", port=int(os.getenv("PORT", 5000)))
     except Exception as e:
         print(f"Erro ao iniciar o servidor Flask: {e}")
