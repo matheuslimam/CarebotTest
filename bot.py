@@ -16,7 +16,7 @@ from uvicorn import run
 print("Inicializando o bot...")
 
 # Configurações do bot
-BOT_TOKEN: Final = os.getenv("BOT_TOKEN", "YOUR TOKEN HERE")
+BOT_TOKEN: Final = os.getenv("BOT_TOKEN")
 RENDER_EXTERNAL_URL: Final = os.getenv("RENDER_EXTERNAL_URL")
 if not BOT_TOKEN or not RENDER_EXTERNAL_URL:
     raise ValueError("BOT_TOKEN e RENDER_EXTERNAL_URL devem estar configurados.")
