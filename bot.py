@@ -97,8 +97,11 @@ if __name__ == "__main__":
 
     async def initialize():
         print("Configurando webhook e inicializando o bot...")
-        await set_webhook()
-        await telegram_app.initialize()
+        await set_webhook()  # Configura o webhook
+        await telegram_app.initialize()  # Inicializa o bot
+        print("Bot inicializado. Iniciando processamento da fila...")
+        await telegram_app.start()  # Inicia o processamento da fila de updates
+
 
     asyncio.run(initialize())
 
@@ -108,7 +111,7 @@ if __name__ == "__main__":
     telegram_app.add_handler(CommandHandler("custom", personalize_command))
     telegram_app.add_handler(MessageHandler(filters.TEXT, process_message))
     telegram_app.add_error_handler(log_error)
+    print("Handlers configurados e registrados.")
 
-    print("Handlers configurados.")
     asgi_app = WsgiToAsgi(app_flask)
     run(asgi_app, host="0.0.0.0", port=int(os.getenv("PORT", 5000)))
