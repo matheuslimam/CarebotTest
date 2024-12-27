@@ -21,16 +21,22 @@ telegram_app = Application.builder().token(BOT_TOKEN).build()
 # Handlers
 async def start(update: Update, context):
     """Handler para o comando /start"""
-    user_name = update.effective_user.first_name
-    print(f"/start recebido de {user_name}")
-    await update.message.reply_text(f"Olá, {user_name}! Eu sou seu bot.")
+    try:
+        user_name = update.effective_user.first_name
+        print(f"Handler /start acionado para {user_name}")
+        await update.message.reply_text(f"Olá, {user_name}! Eu sou seu bot.")
+    except Exception as e:
+        print(f"Erro no handler /start: {e}")
 
 async def echo(update: Update, context):
     """Handler para mensagens de texto"""
-    user_name = update.effective_user.first_name
-    message = update.message.text
-    print(f"Mensagem recebida: {message} de {user_name}")
-    await update.message.reply_text(f"Você disse: {message}")
+    try:
+        user_name = update.effective_user.first_name
+        message = update.message.text
+        print(f"Handler echo acionado para mensagem: {message} de {user_name}")
+        await update.message.reply_text(f"Você disse: {message}")
+    except Exception as e:
+        print(f"Erro no handler echo: {e}")
 
 # Adiciona os handlers
 telegram_app.add_handler(CommandHandler("start", start))
