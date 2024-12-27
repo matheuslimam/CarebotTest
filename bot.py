@@ -122,7 +122,7 @@ async def analyze(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.callback_query.edit_message_text(
         f"Baseado nos sintomas informados, aqui está a análise inicial:\n{results_text}"
     )
-    await update.callback_query.message.reply_text(
+    await update.callback_query.edit_message_text(
         "Escolha um dos planos disponíveis para continuar.",
         reply_markup=ReplyKeyboardMarkup(plans_keyboard, one_time_keyboard=True, resize_keyboard=True)
     )
@@ -162,7 +162,7 @@ conversation_handler = ConversationHandler(
         SYMPTOMS_YES_NO: [CallbackQueryHandler(symptoms_yes_no)],
         
         ANALYZE: [MessageHandler(filters.TEXT, analyze)],
-        PLAN: [MessageHandler(filters.TEXT, plan)],
+        PLAN: [CallbackQueryHandler(plan)],
         PAYMENT: [MessageHandler(filters.TEXT, payment)],
         EXAM: [MessageHandler(filters.TEXT, exam)],
         RESULT: [MessageHandler(filters.TEXT, result)],
