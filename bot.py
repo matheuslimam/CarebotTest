@@ -49,7 +49,7 @@ def webhook():
 # --------------------------
 # Estados e Handlers para o fluxo
 # --------------------------
-WELCOME, SYMPTOMS, ANALYZE, PLAN, PAYMENT, EXAM, RESULT = range(7)
+WELCOME, SYMPTOMS, ANALYZE, PLAN, PAYMENT, EXAM, RESULT, SYMPTOMS_YES_NO = range(8)
 
 # Lista completa de sintomas
 symptoms_list = [
@@ -61,42 +61,50 @@ symptoms_list = [
 plans_keyboard = [["Gratuito", "Ouro", "Diamante"]]
 
 async def welcome(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    keyboard = [[InlineKeyboardButton(symptom, callback_data=symptom)] for symptom in symptoms_list]
-    keyboard.append([InlineKeyboardButton("Concluir", callback_data="Concluir")])
-
-    await update.message.reply_text(
-        "Olá! Seja bem-vindo ao CareBot.\nPor favor, selecione todos os sintomas que você está sentindo.",
-        reply_markup=InlineKeyboardMarkup(keyboard)
-    )
     context.user_data["symptoms"] = []  # Inicializa a lista de sintomas
-    return SYMPTOMS
+    context.user_data["current_symptom_index"] = 0
+    await send_yes_no_question(update, context)
+    return SYMPTOMS_YES_NO
 
-async def symptoms(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def send_yes_no_question(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    index = context.user_data.get("current_symptom_index", 0)
+    if index >= len(symptoms_list):
+        return await analyze(update, context)
+
+    symptom = symptoms_list[index]
+    keyboard = [
+        [InlineKeyboardButton("Sim", callback_data="yes"), InlineKeyboardButton("Não", callback_data="no")]
+    ]
+
+    if update.callback_query:
+        await update.callback_query.edit_message_text(
+            text=f"Você está sentindo: {symptom}?",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+    else:
+        await update.message.reply_text(
+            text=f"Você está sentindo: {symptom}?",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+
+async def symptoms_yes_no(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
-    selected_symptom = query.data
-    if selected_symptom == "Concluir":
-        if not context.user_data["symptoms"]:
-            await query.edit_message_text("Você não selecionou nenhum sintoma. Por favor, selecione pelo menos um.")
-            return SYMPTOMS
-        
-        await query.edit_message_text(
-            f"Você selecionou os seguintes sintomas: {', '.join(context.user_data['symptoms'])}."
-        )
-        return await analyze(update, context)
+    response = query.data
+    index = context.user_data.get("current_symptom_index", 0)
 
-    if selected_symptom not in context.user_data["symptoms"]:
-        context.user_data["symptoms"].append(selected_symptom)
-        await query.edit_message_text(
-            f"Você adicionou: {selected_symptom}.\nSintomas selecionados até agora: {', '.join(context.user_data['symptoms'])}.\nContinue selecionando ou clique em 'Concluir'."
-        )
-    return SYMPTOMS
+    if response == "yes":
+        context.user_data["symptoms"].append(symptoms_list[index])
+
+    context.user_data["current_symptom_index"] = index + 1
+    await send_yes_no_question(update, context)
+    return SYMPTOMS_YES_NO
 
 async def analyze(update: Update, context: ContextTypes.DEFAULT_TYPE):
     symptoms = context.user_data.get("symptoms", [])
     if not symptoms:
-        await update.message.reply_text("Nenhum sintoma selecionado. Por favor, reinicie o processo.")
+        await update.callback_query.edit_message_text("Nenhum sintoma selecionado. Por favor, reinicie o processo.")
         return ConversationHandler.END
 
     # Simulação de análise de carências
@@ -111,7 +119,7 @@ async def analyze(update: Update, context: ContextTypes.DEFAULT_TYPE):
     analysis_results = [deficiencies.get(symptom, "Sem análise disponível") for symptom in symptoms]
     results_text = "\n".join(f"- {symptom}: {result}" for symptom, result in zip(symptoms, analysis_results))
 
-    await update.callback_query.message.reply_text(
+    await update.callback_query.edit_message_text(
         f"Baseado nos sintomas informados, aqui está a análise inicial:\n{results_text}"
     )
     await update.callback_query.message.reply_text(
@@ -151,6 +159,7 @@ async def result(update: Update, context: ContextTypes.DEFAULT_TYPE):
 conversation_handler = ConversationHandler(
     entry_points=[CommandHandler("start", welcome)],
     states={
+        SYMPTOMS_YES_NO: [CallbackQueryHandler(symptoms_yes_no)],
         SYMPTOMS: [CallbackQueryHandler(symptoms)],
         ANALYZE: [MessageHandler(filters.TEXT, analyze)],
         PLAN: [MessageHandler(filters.TEXT, plan)],
@@ -164,9 +173,6 @@ conversation_handler = ConversationHandler(
 # --------------------------
 # Outros Handlers e Configuração do Bot
 # --------------------------
-async def echo_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = update.message.text
-    await update.message.reply_text(f"Você disse: {text}")
 
 async def log_error(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.error(f"Erro no update {update}: {context.error}")
@@ -184,7 +190,6 @@ async def main():
     """
     # 1. Registra handlers
     telegram_app.add_handler(conversation_handler)
-    telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo_message))
     telegram_app.add_error_handler(log_error)
 
     # 2. Configura webhook
