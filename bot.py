@@ -7,11 +7,12 @@ from flask import Flask, request
 from asgiref.wsgi import WsgiToAsgi
 from uvicorn import Config, Server
 
-from telegram import Update, ReplyKeyboardMarkup
+from telegram import Update, ReplyKeyboardMarkup, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import (
     Application,
     CommandHandler,
     MessageHandler,
+    CallbackQueryHandler,
     filters,
     ContextTypes,
     ConversationHandler
@@ -51,34 +52,45 @@ def webhook():
 WELCOME, SYMPTOMS, ANALYZE, PLAN, PAYMENT, EXAM, RESULT = range(7)
 
 # Lista completa de sintomas
-symptoms_keyboard = [
-    ["Cansaço", "Falta de Apetite", "Dor de Cabeça"],
-    ["Náusea", "Tontura", "Palpitações"],
-    ["Falta de Energia", "Insônia", "Outros"]
+symptoms_list = [
+    "Cansaço", "Falta de Apetite", "Dor de Cabeça",
+    "Náusea", "Tontura", "Palpitações",
+    "Falta de Energia", "Insônia"
 ]
 
 plans_keyboard = [["Gratuito", "Ouro", "Diamante"]]
 
 async def welcome(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    keyboard = [[InlineKeyboardButton(symptom, callback_data=symptom)] for symptom in symptoms_list]
+    keyboard.append([InlineKeyboardButton("Concluir", callback_data="Concluir")])
+
     await update.message.reply_text(
-        "Olá! Seja bem-vindo ao CareBot.\nPor favor, informe os sintomas que você está sentindo."
-        "Você pode selecionar vários sintomas.",
-        reply_markup=ReplyKeyboardMarkup(symptoms_keyboard, one_time_keyboard=True, resize_keyboard=True)
+        "Olá! Seja bem-vindo ao CareBot.\nPor favor, selecione todos os sintomas que você está sentindo.",
+        reply_markup=InlineKeyboardMarkup(keyboard)
     )
     context.user_data["symptoms"] = []  # Inicializa a lista de sintomas
     return SYMPTOMS
 
 async def symptoms(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    selected_symptom = update.message.text
-    if selected_symptom == "Outros":
-        await update.message.reply_text("Por favor, descreva os sintomas adicionais.")
-        return SYMPTOMS
-    
-    context.user_data["symptoms"].append(selected_symptom)
-    await update.message.reply_text(
-        f"Você selecionou: {', '.join(context.user_data['symptoms'])}.\n"
-        "Se terminou de selecionar os sintomas, digite 'Concluir'."
-    )
+    query = update.callback_query
+    await query.answer()
+
+    selected_symptom = query.data
+    if selected_symptom == "Concluir":
+        if not context.user_data["symptoms"]:
+            await query.edit_message_text("Você não selecionou nenhum sintoma. Por favor, selecione pelo menos um.")
+            return SYMPTOMS
+        
+        await query.edit_message_text(
+            f"Você selecionou os seguintes sintomas: {', '.join(context.user_data['symptoms'])}."
+        )
+        return await analyze(update, context)
+
+    if selected_symptom not in context.user_data["symptoms"]:
+        context.user_data["symptoms"].append(selected_symptom)
+        await query.edit_message_text(
+            f"Você adicionou: {selected_symptom}.\nSintomas selecionados até agora: {', '.join(context.user_data['symptoms'])}.\nContinue selecionando ou clique em 'Concluir'."
+        )
     return SYMPTOMS
 
 async def analyze(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -99,10 +111,10 @@ async def analyze(update: Update, context: ContextTypes.DEFAULT_TYPE):
     analysis_results = [deficiencies.get(symptom, "Sem análise disponível") for symptom in symptoms]
     results_text = "\n".join(f"- {symptom}: {result}" for symptom, result in zip(symptoms, analysis_results))
 
-    await update.message.reply_text(
+    await update.callback_query.message.reply_text(
         f"Baseado nos sintomas informados, aqui está a análise inicial:\n{results_text}"
     )
-    await update.message.reply_text(
+    await update.callback_query.message.reply_text(
         "Escolha um dos planos disponíveis para continuar.",
         reply_markup=ReplyKeyboardMarkup(plans_keyboard, one_time_keyboard=True, resize_keyboard=True)
     )
@@ -139,10 +151,7 @@ async def result(update: Update, context: ContextTypes.DEFAULT_TYPE):
 conversation_handler = ConversationHandler(
     entry_points=[CommandHandler("start", welcome)],
     states={
-        SYMPTOMS: [
-            MessageHandler(filters.TEXT & ~filters.COMMAND, symptoms),
-            MessageHandler(filters.Regex("^Concluir$"), analyze)
-        ],
+        SYMPTOMS: [CallbackQueryHandler(symptoms)],
         ANALYZE: [MessageHandler(filters.TEXT, analyze)],
         PLAN: [MessageHandler(filters.TEXT, plan)],
         PAYMENT: [MessageHandler(filters.TEXT, payment)],
