@@ -7,7 +7,12 @@ from flask import Flask, request
 from asgiref.wsgi import WsgiToAsgi
 from uvicorn import Config, Server
 
-from telegram import Update, ReplyKeyboardMarkup, InlineKeyboardMarkup, InlineKeyboardButton
+from telegram import (
+    Update,
+    ReplyKeyboardMarkup,
+    InlineKeyboardMarkup,
+    InlineKeyboardButton
+)
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -21,17 +26,26 @@ from telegram.ext import (
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
+# ---------------------------------------------------------------------
+# Configurações de Token e URL (altere para seus valores)
+# ---------------------------------------------------------------------
 BOT_TOKEN = os.getenv("BOT_TOKEN", "YOUR_TOKEN_HERE")
 RENDER_EXTERNAL_URL = os.getenv("RENDER_EXTERNAL_URL", "YOUR_URL_HERE")
 WEBHOOK_PATH = f"/webhook/{BOT_TOKEN}"
 WEBHOOK_URL = f"{RENDER_EXTERNAL_URL}{WEBHOOK_PATH}"
 
+# ---------------------------------------------------------------------
+# Inicialização do Flask e do Bot
+# ---------------------------------------------------------------------
 app_flask = Flask(__name__)
 telegram_app = Application.builder().token(BOT_TOKEN).build()
 
 @app_flask.route(WEBHOOK_PATH, methods=["POST"])
 def webhook():
-    """Rota SÍNCRONA do Flask para receber updates e colocar na fila."""
+    """
+    Rota SÍNCRONA do Flask para receber updates do Telegram
+    e colocar na fila do Python Telegram Bot (PTB).
+    """
     try:
         data = request.get_json(force=True)
         logger.info(f"Recebido update bruto: {data}")
@@ -46,48 +60,67 @@ def webhook():
         traceback.print_exc()
     return "OK", 200
 
-# --------------------------
-# Estados e Handlers para o fluxo
-# --------------------------
+# ---------------------------------------------------------------------
+# Definição dos estados e do fluxo de conversa
+# ---------------------------------------------------------------------
 WELCOME, SYMPTOMS, ANALYZE, PLAN, PAYMENT, EXAM, RESULT, SYMPTOMS_YES_NO = range(8)
 
-# Lista completa de sintomas
 symptoms_list = [
     "Cansaço", "Falta de Apetite", "Dor de Cabeça",
     "Náusea", "Tontura", "Palpitações",
     "Falta de Energia", "Insônia"
 ]
 
+# Teclado de planos (ReplyKeyboard)
 plans_keyboard = [["Gratuito", "Ouro", "Diamante"]]
 
+# ---------------------------------------------------------------------
+# Handlers de cada etapa
+# ---------------------------------------------------------------------
 async def welcome(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data["symptoms"] = []  # Inicializa a lista de sintomas
+    """
+    Início da conversa: zera a lista de sintomas e manda a primeira pergunta (Sim/Não).
+    """
+    context.user_data["symptoms"] = []
     context.user_data["current_symptom_index"] = 0
     await send_yes_no_question(update, context)
     return SYMPTOMS_YES_NO
 
 async def send_yes_no_question(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Pergunta se o usuário está sentindo determinado sintoma,
+    usando InlineKeyboard (Sim/Não).
+    """
     index = context.user_data.get("current_symptom_index", 0)
     if index >= len(symptoms_list):
+        # Se já perguntamos sobre todos os sintomas, chama 'analyze'
         return await analyze(update, context)
 
     symptom = symptoms_list[index]
     keyboard = [
-        [InlineKeyboardButton("Sim", callback_data="yes"), InlineKeyboardButton("Não", callback_data="no")]
+        [
+            InlineKeyboardButton("Sim", callback_data="yes"),
+            InlineKeyboardButton("Não", callback_data="no")
+        ]
     ]
 
+    # Se este handler foi chamado a partir de um callback_query:
     if update.callback_query:
         await update.callback_query.edit_message_text(
             text=f"Você está sentindo: {symptom}?",
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
     else:
+        # Se veio de um comando /start ou mensagem de texto
         await update.message.reply_text(
             text=f"Você está sentindo: {symptom}?",
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
 
 async def symptoms_yes_no(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    CallbackQueryHandler para tratar a resposta Sim/Não do sintoma atual.
+    """
     query = update.callback_query
     await query.answer()
 
@@ -97,17 +130,24 @@ async def symptoms_yes_no(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if response == "yes":
         context.user_data["symptoms"].append(symptoms_list[index])
 
+    # Avança para o próximo sintoma
     context.user_data["current_symptom_index"] = index + 1
     await send_yes_no_question(update, context)
     return SYMPTOMS_YES_NO
 
 async def analyze(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Função que simula análise de carências nutricionais com base nos sintomas.
+    """
     symptoms = context.user_data.get("symptoms", [])
     if not symptoms:
-        await update.callback_query.edit_message_text("Nenhum sintoma selecionado. Por favor, reinicie o processo.")
+        # Se não houve sintomas selecionados, encerra.
+        await update.callback_query.edit_message_text(
+            "Nenhum sintoma selecionado. Por favor, reinicie o processo."
+        )
         return ConversationHandler.END
 
-    # Simulação de análise de carências
+    # Simulação de análise
     deficiencies = {
         "Cansaço": "Possível deficiência de ferro ou vitamina B12",
         "Falta de Apetite": "Possível deficiência de zinco",
@@ -116,68 +156,114 @@ async def analyze(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Palpitações": "Pode indicar falta de potássio ou magnésio",
     }
 
-    analysis_results = [deficiencies.get(symptom, "Sem análise disponível") for symptom in symptoms]
-    results_text = "\n".join(f"- {symptom}: {result}" for symptom, result in zip(symptoms, analysis_results))
+    analysis_results = [
+        deficiencies.get(symptom, "Sem análise disponível") for symptom in symptoms
+    ]
+    results_text = "\n".join(
+        f"- {symptom}: {result}"
+        for symptom, result in zip(symptoms, analysis_results)
+    )
 
+    # Edita a mensagem atual com o resumo da análise
     await update.callback_query.edit_message_text(
-        f"Baseado nos sintomas informados, aqui está a análise inicial:\n{results_text}"
+        text=(
+            f"Baseado nos sintomas informados, aqui está a análise inicial:\n"
+            f"{results_text}"
+        )
     )
-    await update.callback_query.edit_message_text(
-        "Escolha um dos planos disponíveis para continuar.",
-        reply_markup=ReplyKeyboardMarkup(plans_keyboard, one_time_keyboard=True, resize_keyboard=True)
+
+    # Envia uma nova mensagem solicitando a escolha de um plano
+    chat_id = update.callback_query.message.chat_id
+    await telegram_app.bot.send_message(
+        chat_id=chat_id,
+        text="Escolha um dos planos disponíveis para continuar.",
+        reply_markup=ReplyKeyboardMarkup(
+            plans_keyboard,
+            one_time_keyboard=True,
+            resize_keyboard=True
+        ),
     )
+
     return PLAN
 
 async def plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    plan_choice = update.message.text
+    """
+    Trata a mensagem de texto do usuário, que deve ser "Gratuito", "Ouro" ou "Diamante".
+    """
+    plan_choice = update.message.text.strip()
     context.user_data["plan"] = plan_choice
+
     if plan_choice == "Gratuito":
-        await update.message.reply_text("Aqui está uma prévia da sua prescrição básica.")
+        await update.message.reply_text(
+            "Aqui está uma prévia da sua prescrição básica."
+        )
         return ConversationHandler.END
+
     elif plan_choice == "Ouro":
         await update.message.reply_text("Processando prescrição avançada...")
         return PAYMENT
+
     elif plan_choice == "Diamante":
         await update.message.reply_text(
             "Com o plano Diamante, você precisa realizar um exame de sangue. Vamos prosseguir."
         )
         return EXAM
 
+    else:
+        # Se o usuário digitou algo fora das 3 opções
+        await update.message.reply_text(
+            "Por favor, escolha um plano válido: Gratuito, Ouro ou Diamante."
+        )
+        return PLAN
+
 async def payment(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Pede dados do pagamento para o plano 'Ouro'.
+    """
     await update.message.reply_text("Insira os dados do pagamento.")
     return ConversationHandler.END
 
 async def exam(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Exame de sangue processado. Prescrição biodisponível gerada.")
+    """
+    Simula o exame de sangue para o plano 'Diamante'.
+    """
+    await update.message.reply_text(
+        "Exame de sangue processado. Prescrição biodisponível gerada."
+    )
     return RESULT
 
 async def result(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Exibe o resultado final após o exame do plano 'Diamante'.
+    """
     await update.message.reply_text("Aqui está sua prescrição personalizada.")
     return ConversationHandler.END
 
-# Adicionando os handlers ao ConversationHandler
+# ---------------------------------------------------------------------
+# Montagem do ConversationHandler
+# ---------------------------------------------------------------------
 conversation_handler = ConversationHandler(
     entry_points=[CommandHandler("start", welcome)],
     states={
         SYMPTOMS_YES_NO: [CallbackQueryHandler(symptoms_yes_no)],
-        
-        ANALYZE: [MessageHandler(filters.TEXT, analyze)],
-        PLAN: [CallbackQueryHandler(plan)],
-        PAYMENT: [MessageHandler(filters.TEXT, payment)],
-        EXAM: [MessageHandler(filters.TEXT, exam)],
-        RESULT: [MessageHandler(filters.TEXT, result)],
+        PLAN: [MessageHandler(filters.TEXT & (~filters.COMMAND), plan)],
+        PAYMENT: [MessageHandler(filters.TEXT & (~filters.COMMAND), payment)],
+        EXAM: [MessageHandler(filters.TEXT & (~filters.COMMAND), exam)],
+        RESULT: [MessageHandler(filters.TEXT & (~filters.COMMAND), result)],
     },
     fallbacks=[CommandHandler("start", welcome)]
 )
 
-# --------------------------
-# Outros Handlers e Configuração do Bot
-# --------------------------
-
+# ---------------------------------------------------------------------
+# Handler de Erros
+# ---------------------------------------------------------------------
 async def log_error(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.error(f"Erro no update {update}: {context.error}")
     traceback.print_exc()
 
+# ---------------------------------------------------------------------
+# Setup do Webhook e Execução
+# ---------------------------------------------------------------------
 async def set_webhook():
     await telegram_app.bot.set_webhook(WEBHOOK_URL)
     logger.info(f"Webhook definido: {WEBHOOK_URL}")
@@ -201,9 +287,8 @@ async def main():
     # 4. Inicia o PTB *em segundo plano*
     asyncio.create_task(telegram_app.start())
 
-    # 5. Inicia o Uvicorn via Config+Server, sem usar uvicorn.run()
+    # 5. Inicia o Uvicorn via Config+Server (sem usar uvicorn.run())
     asgi_app = WsgiToAsgi(app_flask)
-
     config = Config(
         app=asgi_app,
         host="0.0.0.0",
@@ -213,7 +298,6 @@ async def main():
     )
     server = Server(config)
 
-    # Uvicorn passa a rodar *no* loop atual
     logger.info("Iniciando Uvicorn + Bot no mesmo event loop ...")
     await server.serve()
 
