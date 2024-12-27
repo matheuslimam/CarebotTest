@@ -64,14 +64,24 @@ async def log_error(update: Update, context: ContextTypes.DEFAULT_TYPE):
 @app_flask.route(f"/webhook/{BOT_TOKEN}", methods=["POST"])
 def webhook():
     try:
+        # Log do update bruto recebido do Telegram
         json_update = request.get_json(force=True)
+        print(f"Recebido update bruto: {json_update}")  # Log para verificar o update
+
+        # Decodifica o update para o formato esperado pelo bot
         update = Update.de_json(json_update, telegram_app.bot)
+        print("Update decodificado com sucesso.")  # Log após a decodificação
+
+        # Adiciona o update à fila para processamento
         telegram_app.update_queue.put_nowait(update)
-        print("Update processado com sucesso.")
+        print("Update adicionado à fila do bot.")  # Log confirmando a adição à fila
+
         return "OK", 200
     except Exception as e:
+        # Log detalhado para erros
         print(f"Erro no webhook: {e}")
         return f"Erro no webhook: {e}", 500
+
 
 # Configuração do webhook
 async def set_webhook():
