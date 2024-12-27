@@ -22,12 +22,15 @@ telegram_app = Application.builder().token(BOT_TOKEN).build()
 
 # Comandos do bot
 async def initiate_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    print("Handler /start acionado.")  # Log adicional
     await update.message.reply_text("Olá! Eu sou seu bot. Como posso ajudar?")
 
 async def assist_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    print("Handler /help acionado.")  # Log adicional
     await update.message.reply_text("Aqui está a ajuda!")
 
 async def personalize_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    print("Handler /custom acionado.")  # Log adicional
     await update.message.reply_text("Comando personalizado adicionado com sucesso.")
 
 # Geração de respostas
@@ -47,17 +50,9 @@ def generate_response(user_input: str) -> str:
 
 # Processa mensagens
 async def process_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_type = update.message.chat.type
     text = update.message.text
-
-    print(f"Usuário ({update.message.chat.id}) no tipo {chat_type}: \"{text}\"")
-
-    if chat_type == "group" and BOT_HANDLE in text:
-        cleaned_text = text.replace(BOT_HANDLE, "").strip()
-        response = generate_response(cleaned_text)
-    else:
-        response = generate_response(text)
-
+    print(f"Handler de mensagem acionado. Mensagem: {text}")  # Log adicional
+    response = generate_response(text)
     print("Resposta do bot:", response)
     await update.message.reply_text(response)
 
